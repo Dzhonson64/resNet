@@ -74,7 +74,7 @@ def predict(model):
     actual = model.predict(np.array(x_train))
     print(expected)
     print(actual)
-    cv2.cv2_imshow(img)
+    # cv2.cv2_imshow(img)
 
 
 if __name__ == "__main__":
