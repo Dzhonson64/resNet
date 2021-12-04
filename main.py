@@ -1,6 +1,5 @@
 import json
 
-import msgpack as msgpack
 import tensorflow as tf
 import matplotlib.pyplot as plt
 from tensorflow.keras import datasets, layers, models, losses, Model
@@ -65,33 +64,35 @@ def res_graphic(history):
 def predict(model, trash_fill):
     label = ["Незаполнен", "Заполнен"]
     x_train = []
-    num = 994
+
+    num = np.random.randint(1, 1800)
     img = cv2.imread('./trash_can/' + trash_fill['filename'][num - 1])
-    expected = trash_fill['fill'][num - 1]
+    expected_fill = trash_fill['fill'][num - 1]
+    expected_filename = trash_fill['filename'][num - 1]
     x_train.append(img)
     actual = model.predict(np.array(x_train))
-    print("expected=" + str(label[expected]), " actual_data=" + str(actual), " arg_max_actual=" + str(label[np.argmax(actual)]))
-    print()
-    # cv2.cv2_imshow(img)
+    print("expected_file_name=" + str(expected_filename), " expected_fill=" + str(label[expected_fill]), " actual_data=" + str(actual), "arg_max_actual=" + str(label[np.argmax(actual)]))
+    return (num, actual[0])
 
-def kafka_producer():
+def kafka_producer(img_num, prediction):
 
-    producer = KafkaProducer(bootstrap_servers=['localhost:9092'], value_serializer=lambda m: json.dumps(m).encode('ascii'))
+    producer = KafkaProducer(bootstrap_servers=['localhost:9092'], value_serializer=lambda m: json.dumps(m).encode('utf8'))
     # Asynchronous by default
-    future = producer.send('detect-trash', "test_str")
+    future = producer.send('detect-trash', {'prediction_unfilled': str(prediction[0]), 'prediction_filled': str(prediction[1]), 'image': img_num})
 
     # Block for 'synchronous' sends
     try:
         record_metadata = future.get(timeout=10)
+        # Successful result returns assigned partition and offset
+        print(record_metadata.topic)
+        print(record_metadata.partition)
+        print(record_metadata.offset)
+
     except KafkaError:
         # Decide what to do if produce request failed...
         print("KafkaError")
         pass
 
-    # Successful result returns assigned partition and offset
-    print(record_metadata.topic)
-    print(record_metadata.partition)
-    print(record_metadata.offset)
 
     # produce json messages
 
@@ -104,21 +105,18 @@ def kafka_producer():
 
     def on_send_error(excp):
         print(excp)
-        # handle exception
-
-    # produce asynchronously with callbacks
-    # producer.send('my-topic', b'raw_bytes').add_callback(on_send_success).add_errback(on_send_error)
-    print(1)
-    # block until all async messages are sent
+        # handle exceptionz
     producer.flush()
 
-def kafka_consumer():
-    # To consume latest messages and auto-commit offsets
-    consumer = KafkaConsumer('json-topic',
+def kafka_consumer(model, trash_fill):
+
+    consumer = KafkaConsumer('topic-camera',
                              group_id='group1',
                              bootstrap_servers=['localhost:9092'],
                              auto_offset_reset="earliest")
     for message in consumer:
+        img_num, prediction = predict(model, trash_fill)
+        kafka_producer(img_num, prediction)
         # message value and key are raw bytes -- decode if necessary!
         # e.g., for unicode: `message.value.decode('utf-8')`
         print("%s:%d:%d: key=%s value=%s" % (message.topic, message.partition,
@@ -126,20 +124,15 @@ def kafka_consumer():
                                              message.value))
 
 if __name__ == "__main__":
-
-
+    # To consume latest messages and auto-commit offsets
     trash_fill = pd.read_csv('./trash_fill.csv')
     x_train, y_train = get_train_data('./trash_can/')
 
     base_model, predictions = build_resNet()
     model = compile_network()
     model = fit(model)
-    # res_graphic(history)
+    kafka_consumer(model, trash_fill)
 
-    # kafka_consumer()
-    #
-    # kafka_producer()
 
-    predict(model, trash_fill)
 
 
