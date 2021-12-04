@@ -74,24 +74,18 @@ def predict(model, trash_fill):
     print("expected_file_name=" + str(expected_filename), " expected_fill=" + str(label[expected_fill]), " actual_data=" + str(actual), "arg_max_actual=" + str(label[np.argmax(actual)]))
     return (num, actual[0])
 
-def kafka_producer(img_num, prediction):
+def kafka_producer(img_num, prediction, id_camera):
 
     producer = KafkaProducer(bootstrap_servers=['localhost:9092'], value_serializer=lambda m: json.dumps(m).encode('utf8'))
     # Asynchronous by default
-    future = producer.send('detect-trash', {'prediction_unfilled': str(prediction[0]), 'prediction_filled': str(prediction[1]), 'image': img_num})
+    future = producer.send('detect-trash', {'prediction_unfilled': str(prediction[0]), 'prediction_filled': str(prediction[1]), 'image': img_num, "id_camera": id_camera})
 
     # Block for 'synchronous' sends
-    try:
-        record_metadata = future.get(timeout=10)
-        # Successful result returns assigned partition and offset
-        print(record_metadata.topic)
-        print(record_metadata.partition)
-        print(record_metadata.offset)
-
-    except KafkaError:
-        # Decide what to do if produce request failed...
-        print("KafkaError")
-        pass
+    record_metadata = future.get(timeout=10)
+    # Successful result returns assigned partition and offset
+    print(record_metadata.topic)
+    print(record_metadata.partition)
+    print(record_metadata.offset)
 
 
     # produce json messages
@@ -112,16 +106,17 @@ def kafka_consumer(model, trash_fill):
 
     consumer = KafkaConsumer('topic-camera',
                              group_id='group1',
-                             bootstrap_servers=['localhost:9092'],
-                             auto_offset_reset="earliest")
+                             bootstrap_servers=['localhost:9092'])
     for message in consumer:
         img_num, prediction = predict(model, trash_fill)
-        kafka_producer(img_num, prediction)
+        js = json.loads(message.value)
+        kafka_producer(img_num, prediction, js["id"])
         # message value and key are raw bytes -- decode if necessary!
         # e.g., for unicode: `message.value.decode('utf-8')`
+
         print("%s:%d:%d: key=%s value=%s" % (message.topic, message.partition,
                                              message.offset, message.key,
-                                             message.value))
+                                             js))
 
 if __name__ == "__main__":
     # To consume latest messages and auto-commit offsets
